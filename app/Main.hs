@@ -9,14 +9,16 @@ import Data.Monoid ((<>))
 import Data.Aeson (FromJSON, ToJSON, fromJSON, decode, Value (String), eitherDecode)
 import GHC.Generics
 import Web.Scotty
-import Data.Text.Lazy (Text)
+import Data.Text.Lazy (Text, strip)
 import Data.Text.Lazy.IO as I
 import Data.Aeson.Text (encodeToLazyText)
 import qualified Data.ByteString.Lazy as B
-import Data.List
+import qualified Data.List as LST
 import Control.Monad.IO.Class
 import qualified Text.Fuzzy as Fuzz
 import Text.Regex
+import qualified Data.Text as Text
+
 
 -- DATA TYPES
 
@@ -37,6 +39,23 @@ data Note = Note{
 
 instance ToJSON Note
 instance FromJSON Note
+
+data TextStats = TextStats{
+  symbols_ :: Int,
+  words_ :: Int,
+  sents_ :: Int
+} deriving (Show, Generic, Eq)
+
+instance ToJSON TextStats
+instance FromJSON TextStats
+
+data TextSplits = TextSplits{
+  _words_ :: [String],
+  _sents_ :: [String]
+} deriving (Show, Generic, Eq)
+
+instance ToJSON TextSplits
+instance FromJSON TextSplits
 
 -- SAVE & LOAD (FILES)
 
@@ -71,7 +90,7 @@ findNotesByTag :: [Note] -> [Tag] -> [Note]
 findNotesByTag notes tags = map (notes!!) possible_indices where
   tag_ids = map (\(Tag id _) -> id) tags
   note_tagids = map (\(Note _ _ tagList _) -> tagList) notes
-  possible_indices = findIndices(`hasAny` tag_ids) note_tagids
+  possible_indices = LST.findIndices(`hasAny` tag_ids) note_tagids
 
 getNoteById :: Int -> [Note] -> Note
 getNoteById id notes = if null result
@@ -107,7 +126,7 @@ hasAny :: Eq a => [a] -> [a] -> Bool
 hasAny l1 = any (or . (\ e2 -> map (e2 ==) l1))
 
 enumerateHelper :: Num t => t -> [b] -> [(t, b)]
-enumerateHelper i (el : lst)  = (i, el) : (i, el) : enumerateHelper (i + 1) lst
+enumerateHelper i (el : lst)  = (i, el) : enumerateHelper (i + 1) lst
 enumerateHelper _ _ = []
 
 enumerate :: [a] -> [(Int, a)]
@@ -117,21 +136,37 @@ renumerateNotes :: [Note] -> [Note]
 renumerateNotes notes = [Note {noteId=i, noteHeader=note_header, noteTags=note_tags, noteText=note_text} 
   | (i, Note _ note_header note_tags note_text) <- enumerate notes]
 
-removeDuplicates :: Eq a => [a] -> [a]
-removeDuplicates = rdHelper []
-    where rdHelper seen [] = seen
-          rdHelper seen (x:xs)
-              | x `elem` seen = rdHelper seen xs
-              | otherwise = rdHelper (seen ++ [x]) xs
 
--- renumerateTags :: [Tag] -> [Tag]
--- renumerateTags tags = [Tag {tagId=i, tagName=name} | (Tag _ name) <- tags, i <- [0..length tags]]
+-- NLP
+lStrip :: String -> String
+lStrip (sym:text) = if sym == ' ' then lStrip text else sym:text
+lStrip "" = ""
 
-getStats :: String -> String -> String
-getStats "symbols" text = "Length of note in symbols: " ++ show (length text)
-getStats "words" text = "Length of note in words: " ++ show (length (splitRegex (mkRegex "s+") text))
-getStats "sents" text = "Lenght of note in sents: " ++ show (length (splitRegex (mkRegex "[^.!?]*[.!?]") text))
-getStats _ _ = "Not implemented"
+rStrip :: String -> String
+rStrip = reverse . lStrip . reverse
+
+allStrip :: String -> String
+allStrip  = rStrip . lStrip
+
+splitWords :: String -> [String]
+splitWords text =  map allStrip $ filter (/="") $ splitRegex (mkRegex "[^a-zA-Z]+") text
+
+splitSents :: String -> [String]
+splitSents text = map allStrip $ filter (/="") $ splitRegex (mkRegex "[.:!?]") text
+
+
+getNoteStats :: [Char] -> TextStats
+getNoteStats text = TextStats {
+  symbols_ = length text, 
+  words_ = length $ splitWords text, 
+  sents_ = length $ splitSents text
+}
+
+getNoteSplits :: String -> TextSplits
+getNoteSplits text = TextSplits{
+  _words_=splitWords text,
+  _sents_=splitSents text
+}
 
   
 main :: IO ()
@@ -139,10 +174,25 @@ main = do
   Prelude.putStrLn "Starting Smart Notes server"
   scotty 3000 $ do
 
-
     -- NOTES API
 
-    get "/api/notes/all" $ do
+    get "/api/notes" $ do
+      notes <- liftIO loadNotes
+      json notes
+    
+    post "/api/notes" $ do
+      text <- param "text"
+      header <- param "header"
+      tags <- param "tags"
+      notes <- liftIO loadNotes
+      liftIO $ saveNotes $ renumerateNotes $ notes ++ [Note{noteId = -1, noteHeader = header, noteTags = tags, noteText = text}]
+      notes <- liftIO loadNotes
+      json notes
+
+    delete "/api/notes/:id" $ do
+      id <- param "id"
+      notes <- liftIO loadNotes
+      liftIO $ saveNotes $ renumerateNotes $ filter (\(Note nid _ _ _) -> nid /= id) notes
       notes <- liftIO loadNotes
       json notes
 
@@ -152,61 +202,53 @@ main = do
       notes <- liftIO loadNotes
       json $ findNotesByTag notes $ filter (\(Tag tid _) -> tid == tag) tags
 
-    get "/api/notes/by_id/:id" $ do
-      id <- param "id"
-      notes <- liftIO loadNotes
-      json $ getNoteById id notes
-
-    get "/api/notes/add" $ do
-      text <- param "text"
-      header <- param "header"
-      -- tags <- param "tags"
-      notes <- liftIO loadNotes
-      liftIO $ saveNotes $ renumerateNotes $ notes ++ [Note{noteId = -1, noteHeader = header, noteTags = [], noteText = text}]
-      notes <- liftIO loadNotes
-      json notes
-
-
-    get "/api/notes/remove/by_id/:id" $ do
-      id <- param "id"
-      notes <- liftIO loadNotes
-      liftIO $ saveNotes $ renumerateNotes $ filter (\(Note nid _ _ _) -> nid /= id) notes
-      notes <- liftIO loadNotes
-      json notes
-
     get "/api/notes/search" $ do
       query <- param "query"
       notes <- liftIO loadNotes
       json $ searchNotes query notes 
-
-    get "/api/notes/stats/:kind/:id" $ do
-      kind <- param "kind"
+    
+    get "/api/notes/stats" $ do
       id <- param "id"
       notes <- liftIO loadNotes
       let note = getNoteById id notes
-      json $ if -1 == noteId note 
-        then getStats kind $ noteText note 
-        else noteText note
+      json $ if -1 == noteId note
+        then TextStats {symbols_=0, words_=0, sents_=0}
+        else getNoteStats (noteText note)
 
-    get "/api/notes/remove/duplicates" $ do
+    get "/api/notes/splits" $ do
+      id <- param "id"
       notes <- liftIO loadNotes
-      liftIO $ saveNotes $ removeDuplicates notes
+      let note = getNoteById id notes
+      json $ if -1 == noteId note
+        then TextSplits {_words_=[], _sents_=["Note not found!"]}
+        else getNoteSplits (noteText note)
+
+    post "/api/notes/service/renumerate" $ do
+      notes <- liftIO loadNotes
+      liftIO $ saveNotes $ renumerateNotes notes
       notes <- liftIO loadNotes
       json notes
+
+    get "/api/notes/:id" $ do
+      id <- param "id"
+      notes <- liftIO loadNotes
+      json $ getNoteById id notes
+
 
 
     -- TAGS API
 
-    get "/api/tags/all" $ do
+    get "/api/tags" $ do
       tags <- liftIO loadTags
       json tags
 
-    get "/api/tags/by_id/:id" $ do
-      id <- param "id"
-      tags <- liftIO loadTags
-      json $ filter (\(Tag tid _) -> tid == id) tags
 
-    get "/api/tags/add/:name" $ do
+    get "/api/tags/search" $ do
+      query <- param "query"
+      tags <- liftIO loadTags
+      json $ searchTags query tags
+
+    post "/api/tags/:name" $ do
       name <- param "name"
       tags <- liftIO loadTags
       liftIO $ saveTags $ if (name `elem` map (\(Tag _ name) -> name) tags) || (name == "")
@@ -214,8 +256,8 @@ main = do
         else tags ++ [Tag {tagId = length tags, tagName=name}]
       tags <- liftIO loadTags
       json tags
-    
-    get "/api/tags/remove/by_name/:name" $ do
+
+    delete "/api/tags/by_name/:name" $ do
       name <- param "name"
       tags <- liftIO loadTags
       notes <- liftIO loadNotes
@@ -227,7 +269,7 @@ main = do
       tags <- liftIO loadTags
       json tags
 
-    get "/api/tags/remove/by_id/:id" $ do
+    delete "/api/tags/:id" $ do
       id <- param "id"
       tags <- liftIO loadTags
       notes <- liftIO loadNotes
@@ -236,7 +278,7 @@ main = do
       tags <- liftIO loadTags
       json tags
 
-    get "/api/tags/search" $ do
-      query <- param "query"
+    get "/api/tags/:id" $ do
+      id <- param "id"
       tags <- liftIO loadTags
-      json $ searchTags query tags
+      json $ filter (\(Tag tid _) -> tid == id) tags

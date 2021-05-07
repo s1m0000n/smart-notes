@@ -2,65 +2,71 @@
 
 Smart Notes - учебный заметочный веб-сервис с возможностями анализа текста с REST API на языке Haskell 
 
-## Планируемые возможности и эндпоинты:
+## TO-DO
+- [ ] Implement statistics
+- [ ] Implement NLP features
+- [ ] Divide and conquer the code in Main into files
+- [ ] Clean up project files
 
-- `api/notes/` - api заметок
-  - `GET api/notes/all` - список всех заметок -> `[id]`: `[Int]`
-  - `GET api/notes/by_tag/:tag` - список заметок с указанным тегом -> `[id]`: `[Int]`
-    - `tag` - имя тега [существующие имена тегов/`'untagged'`, `String`]
-  - `GET api/notes/by_id/:id` - получить заметку по id: заголовок, текст, теги -> `{heading: '', text: '', tags: []}`
-    - `id` - id заметки [`Int`]
-  - `POST api/notes` - добавить новую заметку -> `status`: `Bool`
-    - `header` - заголовок [`String`]
-    - `text` - основной текст заметки [`String`]
-    - `tags` - список тегов [`[String]`, опционально], если указан `'auto'` - список тегов формируется автоматически на основе статистического и семантического анализа сущестующих тегов
-  - `DELETE api/notes` - удалить заметку -> `status`: `Bool`
-    - `id` - id заметки [`Int`]
-  - `UPDATE api/notes` - обновить заметку -> `status`: `Bool`
-    - `id` - id заметки [`Int`]
-    - `header` - заголовок [`String`, опционально]
-    - `text` - основной текст заметки [`String`, опционально]
-    - `tags` - список тегов [`[String]`, опционально], если указан `'auto'` - список тегов формируется автоматически на основе статистического и семантического анализа сущестующих тегов
-    - `append_text` - не удалять старый текст [`Bool`, опционально, по-умолчанию - `False`]
-    - `append_tags` - не удалять старыe теги [`Bool`, опционально, по-умолчанию - `False`]
-  - `GET api/notes/find/:query` - поиск по заметкам -> `[id]`: `[Int]`
-    - `query` - запрос [`String`]
-  
+## Особенности API
+### Типы возвращаемых данных
+```haskell
+Tag: 
+  tagId :: Int,
+  tagName :: String
+
+Note: 
+  noteId :: Int,
+  noteHeader :: String,
+  noteTags :: [Int],
+  noteText :: String
+
+TextStats:
+  symbols_ :: Int,
+  words_ :: Int,
+  sents_ :: Int
+
+TextSplits:
+  _words_ :: [String],
+  _sents_ :: [String]
+```
+
+### Routing
+
+- `/api/notes/` - api заметок
+  - [x] `GET .` - список всех заметок $\longrightarrow$ `[Note]`
+  - [x] `GET ./by_tag/:tag` - список заметок с указанным тегом $\longrightarrow$ `[Note]`
+    - `tag :: Int` - id тега для поиска 
+  - [x] `GET ./:id` - получить заметку по id $\longrightarrow$ заметка `Note`
+    - `id :: Int` - id заметки
+  - [x] `POST .` - добавить новую заметку $\longrightarrow$ обновлённый список :: `[Note]`
+    - `header :: String` - заголовок
+    - `text :: String` - основной текст заметки
+    - `tags :: [Int]` - список тегов
+  - [x] `DELETE ./:id` - удалить заметку по `id`: `Int` -> обновлённый список :: `[Note]`\
+    - `id :: Int` - id заметки
+  - [x] `GET ./search` - найти подходящие заметки с помощью нечёткого поиска по заголовкам и тексту заметок$\longrightarrow$ найденные заметки `[Note]`
+    - `query: String` - запрос
+  - [x] `GET ./stats/:id` - получить статистики о заметке $\longrightarrow$ `TextStats`
+    - `id :: Int` - id заметки
+  - [x] `GET ./splits/:id` - получить статистики о заметке $\longrightarrow$ `TextSplits`
+    - `id :: Int` - id заметки 
+  - [ ] `GET ./summary/:id` - получить автоматически сегенрированный реферат заметки
+    - `id :: Int` - id заметки
 
 - `api/tags/` - api тегов
-  - `GET api/tags/all` - список всех тегов -> `[tag]`: `[String]`
-  - `POST api/tags` - создать тег -> `status`: `Bool`
-    - `tag` - имя тега [`String`]
-    - `auto_associate` - найти соответствующие тегу заметки автоматически [`Bool`, опционально, по-умолчанию - `False`]
-  - `DELETE api/tags` - удалить тег -> `status`: `Bool`
-    - `tag` - имя тега [существующее имя тега, `String`]
-    - `keep_notes` - оставить заметки [`Bool`, по-умолчанию `True`]
-  - `GET api/tags/find` - поиск по тегам -> `[tag]`: `[String]`
-    - `query` - запрос [`String`]
-
-- `api/tools` - api для разных фишек с обработкой текста
-
-  -`GET api/tools/stats` - получить статистики текста заметки -> `{pos: {...}, top_words: [{}], general: {}}`
-    - `id` - id заметки [`Int`]
-    - `options` - какие статистики посчитать [`[String]`, по-умолчанию - `'all'`]  
-    Возможные значение в списке статистик:
-      - `pos` - частереченый анализ
-      - `top_words` - самые частые леммы
-      - `general` - сколько всего букв, слов(в т.ч. уникальных), предложений
-  - `GET api/tools/summary` - получить автореферат заметки -> `''`: `String`
-    - `id` - id заметки [`Int`]
-    - `len` - желаемая длина текста в предложениях [`Int`]
-    - `fast` - использовать более быстрый метод [`Bool`]
-  - `GET api/tools/top_similar` - получить ID наиболее похожих по содержанию заметок -> `[id]`: `[Int]`
-    - `id` - id заметки [`Int`]
-    - `fast` - использовать более быстрый метод [`Bool`]
-    - `n` - количество
-
-## Этапы реализации
-
-- [x] Проработка, прототипирование и согласование endpoints и функциональности
-- [x] Изучение фреймворков
-- [ ] Реализация заметок, прикручивание базы данных
-- [ ] Реализация простых тегов
-- [ ] Реализация поиска (мб. расстояние Левенштейна)
-- [ ] Реализация других NLP фишек
+  - [x] `GET .` - список всех тегов $\longrightarrow$ список всех тегов `[Tag]`
+  - [ ] `POST ./new_match/:name` создать новый тег и автоматически найти и добавить в заметки по семантике $\longrightarrow$ обновлённый список тегов `[Tag]`
+    - `name :: String` - имя нового тега
+  - [x] `POST ./:name` - создать тег $\longrightarrow$ обновлённый список тегов `[Tag]`
+    - `name :: String` - имя нового тега
+  - [x] `DELETE ./:id` - удалить тег по id $\longrightarrow$ обновлённый список тегов `[Tag]`
+    - `id :: Int` - id тега для удаления
+  - [x] `DELETE ./by_name/:name` - удалить тег по имени $\longrightarrow$ обновлённый список тегов `[Tag]`
+    - `name :: String` - имя нового тега
+  - [x] `GET ./search` - найти подходящие теги с помощью нечёткого поиска по именам $\longrightarrow$ найденные теги `[Tag]`
+    - `query :: String` - запрос
+  - [ ] `GET ./stats/:id` - статистика использования тега и заметок с ним $\longrightarrow$ `{uses_num: Int, uses_stats: TextStats}`
+    - `id :: Int` - id тега
+  - [ ] `GET ./stats/by_name/:name` - статистика использования тега и заметок с ним $\longrightarrow$ `{uses_num: Int, uses_stats: TextStats}`
+    - `name :: String` - имя тега
