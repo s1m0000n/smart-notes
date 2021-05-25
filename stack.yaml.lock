@@ -3,7 +3,14 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: stemmer-0.5.2@sha256:823aec56249ec2619f60a2c0d1384b732894dbbbe642856d337ebfe9629a0efd,4082
+    pantry-tree:
+      size: 5959
+      sha256: e88410158af145406b4265c693cfb095b6ca24ff66851c65697dccf0eba0c5d7
+  original:
+    hackage: stemmer-0.5.2
 snapshots:
 - completed:
     size: 565712

@@ -2,171 +2,16 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 
-
 module Main where
 
 import Data.Monoid ((<>))
-import Data.Aeson (FromJSON, ToJSON, fromJSON, decode, Value (String), eitherDecode)
-import GHC.Generics
-import Web.Scotty
-import Data.Text.Lazy (Text, strip)
-import Data.Text.Lazy.IO as I
-import Data.Aeson.Text (encodeToLazyText)
-import qualified Data.ByteString.Lazy as B
-import qualified Data.List as LST
-import Control.Monad.IO.Class
-import qualified Text.Fuzzy as Fuzz
-import Text.Regex
-import qualified Data.Text as Text
-
-
--- DATA TYPES
-
-data Tag = Tag {
-  tagId :: Int,
-  tagName :: String
-} deriving (Show, Generic, Eq)
-
-instance ToJSON Tag
-instance FromJSON Tag
-
-data Note = Note{
-  noteId :: Int,
-  noteHeader :: String,
-  noteTags :: [Int],
-  noteText :: String
-} deriving (Show, Generic, Eq)
-
-instance ToJSON Note
-instance FromJSON Note
-
-data TextStats = TextStats{
-  symbols_ :: Int,
-  words_ :: Int,
-  sents_ :: Int
-} deriving (Show, Generic, Eq)
-
-instance ToJSON TextStats
-instance FromJSON TextStats
-
-data TextSplits = TextSplits{
-  _words_ :: [String],
-  _sents_ :: [String]
-} deriving (Show, Generic, Eq)
-
-instance ToJSON TextSplits
-instance FromJSON TextSplits
-
--- SAVE & LOAD (FILES)
-
-saveTags :: ToJSON a => a -> IO ()
-saveTags tags = I.writeFile "tags.json" (encodeToLazyText tags)
-
-saveNotes :: ToJSON a => a -> IO ()
-saveNotes notes = I.writeFile "notes.json" (encodeToLazyText notes)
-
-loadNotes :: IO [Note]
-loadNotes = do
-  result <- (eitherDecode <$> B.readFile "notes.json") :: IO (Either String [Note])
-  case result of
-    Left err -> do
-      print err
-      return []
-    Right notes -> return notes
-
-loadTags :: IO [Tag]
-loadTags = do
-  result <- (eitherDecode <$> B.readFile "tags.json") :: IO (Either String [Tag])
-  case result of
-    Left err -> do
-      print err
-      return []
-    Right tags -> return tags
-
-
--- FIND BY
-
-findNotesByTag :: [Note] -> [Tag] -> [Note]
-findNotesByTag notes tags = map (notes!!) possible_indices where
-  tag_ids = map (\(Tag id _) -> id) tags
-  note_tagids = map (\(Note _ _ tagList _) -> tagList) notes
-  possible_indices = LST.findIndices(`hasAny` tag_ids) note_tagids
-
-getNoteById :: Int -> [Note] -> Note
-getNoteById id notes = if null result
-  then Note {noteId= -1, noteHeader="Note not found", noteTags=[], noteText="Note doesn't exist"}
-  else head result
-  where result = filter (\(Note nid _ _ _) -> nid == id) notes
-
-
--- SEARCH
-
-searchNotes :: String -> [Note] -> [Note]
-searchNotes query notes = map (\(Fuzz.Fuzzy original _ _) -> original) $ Fuzz.filter query notes "" "" (\(Note _ header _ text) -> header ++ " " ++ text) False
-
-searchTags :: String -> [Tag] -> [Tag]
-searchTags query tags = map (\(Fuzz.Fuzzy original _ _) -> original) $ Fuzz.filter query tags "" "" (\(Tag _ name) -> name) False
-
--- HELPERS & SERVICE
-
-removeTagInNotes :: [Note] -> [Tag] -> Int -> [Note]
-removeTagInNotes notes tags id = map (\(Note note_id note_header note_tags note_text) ->
-        Note {
-          noteId=note_id,
-          noteHeader=note_header, 
-          noteTags = if note_id `elem` note_ids_to_modify
-            then filter (/= id) note_tags
-            else note_tags, 
-          noteText=note_text
-  }) notes where
-    notes_to_modify = findNotesByTag notes $ filter (\(Tag tid _) -> tid == id) tags
-    note_ids_to_modify = map (\(Note nid _ _ _) -> nid) notes_to_modify
-
-hasAny :: Eq a => [a] -> [a] -> Bool
-hasAny l1 = any (or . (\ e2 -> map (e2 ==) l1))
-
-enumerateHelper :: Num t => t -> [b] -> [(t, b)]
-enumerateHelper i (el : lst)  = (i, el) : enumerateHelper (i + 1) lst
-enumerateHelper _ _ = []
-
-enumerate :: [a] -> [(Int, a)]
-enumerate = enumerateHelper 0
-
-renumerateNotes :: [Note] -> [Note]
-renumerateNotes notes = [Note {noteId=i, noteHeader=note_header, noteTags=note_tags, noteText=note_text} 
-  | (i, Note _ note_header note_tags note_text) <- enumerate notes]
-
-
--- NLP
-lStrip :: String -> String
-lStrip (sym:text) = if sym == ' ' then lStrip text else sym:text
-lStrip "" = ""
-
-rStrip :: String -> String
-rStrip = reverse . lStrip . reverse
-
-allStrip :: String -> String
-allStrip  = rStrip . lStrip
-
-splitWords :: String -> [String]
-splitWords text =  map allStrip $ filter (/="") $ splitRegex (mkRegex "[^a-zA-Z]+") text
-
-splitSents :: String -> [String]
-splitSents text = map allStrip $ filter (/="") $ splitRegex (mkRegex "[.:!?]") text
-
-
-getNoteStats :: [Char] -> TextStats
-getNoteStats text = TextStats {
-  symbols_ = length text, 
-  words_ = length $ splitWords text, 
-  sents_ = length $ splitSents text
-}
-
-getNoteSplits :: String -> TextSplits
-getNoteSplits text = TextSplits{
-  _words_=splitWords text,
-  _sents_=splitSents text
-}
+import Web.Scotty ( delete, get, json, param, post, scotty )
+import Control.Monad.IO.Class ( MonadIO(liftIO) )
+import DataStructures
+import FileProcessing
+import Finder
+import Numerators
+import NLP
 
   
 main :: IO ()
@@ -207,7 +52,7 @@ main = do
       notes <- liftIO loadNotes
       json $ searchNotes query notes 
     
-    get "/api/notes/stats" $ do
+    get "/api/notes/stats/:id" $ do
       id <- param "id"
       notes <- liftIO loadNotes
       let note = getNoteById id notes
@@ -215,7 +60,7 @@ main = do
         then TextStats {symbols_=0, words_=0, sents_=0}
         else getNoteStats (noteText note)
 
-    get "/api/notes/splits" $ do
+    get "/api/notes/splits/:id" $ do
       id <- param "id"
       notes <- liftIO loadNotes
       let note = getNoteById id notes
@@ -234,14 +79,14 @@ main = do
       notes <- liftIO loadNotes
       json $ getNoteById id notes
 
-
+    get "/api/notes/summary" $ do
+      id <- param "id"
+      n <- param "n"
+      notes <- liftIO loadNotes
+      let found_note = getNoteById id notes
+      json $ summarize n $ noteText found_note
 
     -- TAGS API
-
-    get "/api/tags" $ do
-      tags <- liftIO loadTags
-      json tags
-
 
     get "/api/tags/search" $ do
       query <- param "query"
@@ -269,6 +114,36 @@ main = do
       tags <- liftIO loadTags
       json tags
 
+    get "/api/tags/stats/by_name/:name" $ do
+      name <- param "name"
+      notes <- liftIO loadNotes
+      tags <- liftIO loadTags
+      let notes_of_tag = findNotesByTag notes [getTagByName name tags]
+      json TagStats{
+          notes_with_this_tag=length notes_of_tag,
+          symbols_of_notes=sum $ map (length . noteText) notes_of_tag,
+          words_of_notes=sum $ map (length . words . noteText) notes_of_tag,
+          sents_of_notes=sum $ map (length . splitSents . noteText) notes_of_tag
+        }
+
+    get "/api/tags/stats/:id" $ do
+      id <- param "id"
+      notes <- liftIO loadNotes
+      tags <- liftIO loadTags
+      let notes_of_tag = findNotesByTag notes [getTagById id tags]
+      json TagStats{
+          notes_with_this_tag=length notes_of_tag,
+          symbols_of_notes=sum $ map (length . noteText) notes_of_tag,
+          words_of_notes=sum $ map (length . words . noteText) notes_of_tag,
+          sents_of_notes=sum $ map (length . splitSents . noteText) notes_of_tag
+        }
+
+
+    get "/api/tags/:id" $ do
+      id <- param "id"
+      tags <- liftIO loadTags
+      json $ getTagById id tags
+    
     delete "/api/tags/:id" $ do
       id <- param "id"
       tags <- liftIO loadTags
@@ -278,7 +153,19 @@ main = do
       tags <- liftIO loadTags
       json tags
 
-    get "/api/tags/:id" $ do
-      id <- param "id"
+    get "/api/tags" $ do
       tags <- liftIO loadTags
-      json $ filter (\(Tag tid _) -> tid == id) tags
+      json tags
+
+    get "/api/notes" $ do
+      notes <- liftIO loadNotes
+      json notes
+    
+    post "/api/notes" $ do
+      text <- param "text"
+      header <- param "header"
+      tags <- param "tags"
+      notes <- liftIO loadNotes
+      liftIO $ saveNotes $ renumerateNotes $ notes ++ [Note{noteId = -1, noteHeader = header, noteTags = tags, noteText = text}]
+      notes <- liftIO loadNotes
+      json notes

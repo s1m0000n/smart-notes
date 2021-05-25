@@ -66,7 +66,7 @@ TextSplits:
     - `name :: String` - имя нового тега
   - [x] `GET ./search` - найти подходящие теги с помощью нечёткого поиска по именам $\longrightarrow$ найденные теги `[Tag]`
     - `query :: String` - запрос
-  - [ ] `GET ./stats/:id` - статистика использования тега и заметок с ним $\longrightarrow$ `{uses_num: Int, uses_stats: TextStats}`
+  - [x] `GET ./stats/:id` - статистика использования тега и заметок с ним $\longrightarrow$ `{uses_num: Int, uses_stats: TextStats}`
     - `id :: Int` - id тега
-  - [ ] `GET ./stats/by_name/:name` - статистика использования тега и заметок с ним $\longrightarrow$ `{uses_num: Int, uses_stats: TextStats}`
+  - [x] `GET ./stats/by_name/:name` - статистика использования тега и заметок с ним $\longrightarrow$ `{uses_num: Int, uses_stats: TextStats}`
     - `name :: String` - имя тега
