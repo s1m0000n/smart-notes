@@ -51,8 +51,9 @@ TextSplits:
     - `id :: Int` - id заметки
   - [x] `GET ./splits/:id` - получить статистики о заметке $\longrightarrow$ `TextSplits`
     - `id :: Int` - id заметки 
-  - [ ] `GET ./summary/:id` - получить автоматически сегенрированный реферат заметки
+  - [ ] `GET ./summary` - получить автоматически сегенрированный реферат заметки $\longrightarrow$ `String`
     - `id :: Int` - id заметки
+    - `n :: Int` - число ожидаемых предложений в реферате
 
 - `api/tags/` - api тегов
   - [x] `GET .` - список всех тегов $\longrightarrow$ список всех тегов `[Tag]`

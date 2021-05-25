@@ -16,10 +16,7 @@ import NLP
   
 main :: IO ()
 main = do
-  Prelude.putStrLn "Starting Smart Notes server"
   scotty 3000 $ do
-
-    -- NOTES API
 
     get "/api/notes" $ do
       notes <- liftIO loadNotes
@@ -86,8 +83,6 @@ main = do
       let found_note = getNoteById id notes
       json $ summarize n $ noteText found_note
 
-    -- TAGS API
-
     get "/api/tags/search" $ do
       query <- param "query"
       tags <- liftIO loadTags
@@ -137,7 +132,6 @@ main = do
           words_of_notes=sum $ map (length . words . noteText) notes_of_tag,
           sents_of_notes=sum $ map (length . splitSents . noteText) notes_of_tag
         }
-
 
     get "/api/tags/:id" $ do
       id <- param "id"
